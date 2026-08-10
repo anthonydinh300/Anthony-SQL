@@ -1,0 +1,157 @@
+-- Loading Files
+USE hcad_wholesale;
+
+LOAD DATA INFILE '(Files located)/real_acct_owner.txt' 
+INTO TABLE real_acct_owner 
+FIELDS TERMINATED BY '\t' 
+ENCLOSED BY '"' 
+LINES TERMINATED BY '\n' 
+IGNORE 1 ROWS;
+
+LOAD DATA INFILE '(Files located)/land_info.txt' 
+INTO TABLE land_info 
+FIELDS TERMINATED BY '\t' 
+ENCLOSED BY '"' 
+LINES TERMINATED BY '\n' 
+IGNORE 1 ROWS;
+
+LOAD DATA INFILE '(Files located)/building_res.txt' 
+INTO TABLE building_res 
+FIELDS TERMINATED BY '\t' 
+ENCLOSED BY '"' 
+LINES TERMINATED BY '\n' 
+IGNORE 1 ROWS;
+
+LOAD DATA INFILE '(Files located)/building_comm.txt' 
+INTO TABLE building_comm 
+FIELDS TERMINATED BY '\t' 
+ENCLOSED BY '"' 
+LINES TERMINATED BY '\n' 
+IGNORE 1 ROWS;
+
+LOAD DATA INFILE '(Files located)/extra_features.txt' 
+INTO TABLE extra_features 
+FIELDS TERMINATED BY '\t' 
+ENCLOSED BY '"' 
+LINES TERMINATED BY '\n' 
+IGNORE 1 ROWS;
+
+LOAD DATA INFILE '(Files located)/fixtures.txt' 
+INTO TABLE fixtures 
+FIELDS TERMINATED BY '\t' 
+ENCLOSED BY '"' 
+LINES TERMINATED BY '\n' 
+IGNORE 1 ROWS;
+
+LOAD DATA INFILE '(Files located)/structural_elem.txt' 
+INTO TABLE structural_elem 
+FIELDS TERMINATED BY '\t' 
+ENCLOSED BY '"' 
+LINES TERMINATED BY '\n' 
+IGNORE 1 ROWS;
+
+-- Data Cohorting
+
+USE hcad_wholesale;
+
+CREATE OR REPLACE VIEW vw_clean_private_land AS
+SELECT 
+    o.account_number AS account_number, 
+    o.owner_name_1 AS owner_name,
+    
+    -- Correct the decimal shift and calculate metrics
+    (li.tot_acreage * 10) AS true_acres, 
+    ((li.tot_acreage * 10) * 43560) AS square_footage,
+    li.land_value AS assessed_value, 
+    
+    -- Mailing data
+    o.mail_addr_1 AS mailing_address, 
+    o.mail_city AS mailing_city, 
+    o.mail_state AS mailing_state, 
+    o.mail_zip AS mailing_zip
+FROM 
+    real_acct_owner o
+INNER JOIN 
+    land_info li ON o.account_number = li.account_number
+WHERE 
+    o.mail_state <> 'TX'
+    
+    -- Corporate & Entity Scrubbing
+    AND o.owner_name_1 NOT LIKE '%LLC%' 
+    AND o.owner_name_1 NOT LIKE '%INC%' 
+    AND o.owner_name_1 NOT LIKE '%CORP%' 
+    AND o.owner_name_1 NOT LIKE '%LTD%' 
+    AND o.owner_name_1 NOT LIKE '%PARTNERS%' 
+    AND o.owner_name_1 NOT LIKE '%TRUST%' 
+    AND o.owner_name_1 NOT LIKE '%LLP%' 
+    AND o.owner_name_1 NOT LIKE '% CO %' 
+    AND o.owner_name_1 NOT LIKE '%CO.%' 
+    AND o.owner_name_1 NOT LIKE '% COMPANY%'
+    
+    -- Municipal Scrubbing
+    AND o.owner_name_1 NOT LIKE '%CITY OF%' 
+    AND o.owner_name_1 NOT LIKE '%HARRIS COUNTY%' 
+    AND o.owner_name_1 NOT LIKE '%AUTHORITY%' 
+    AND o.owner_name_1 NOT LIKE '%CHURCH%' 
+    AND o.owner_name_1 NOT LIKE '%HOA%' 
+    AND o.owner_name_1 NOT LIKE '%DISTRICT%';
+
+    -- Mid-Sized Acreage Cohort
+
+
+-- 1. MEDIUM-DENSITY / TOWNHOME LIST (0.115 to 0.50 Acres)
+SELECT 
+    account_number AS `Account Number`,
+    owner_name AS `Owner Name`,
+    true_acres AS `True Acres`,
+    square_footage AS `Square Footage`,
+    FLOOR(true_acres * 33) AS `Estimated Units (at 33/acre)`,
+    assessed_value AS `Assessed Value`,
+    mailing_address AS `Mailing Address`,
+    mailing_city AS `Mailing City`,
+    mailing_state AS `Mailing State`,
+    mailing_zip AS `Mailing Zip`
+FROM 
+    vw_clean_private_land
+WHERE 
+    true_acres BETWEEN 0.115 AND 0.50
+ORDER BY 
+    true_acres DESC;
+
+-- 2. LOW-DENSITY / GARDEN-STYLE LIST (0.501 to 2.0 Acres)
+SELECT 
+    account_number AS `Account Number`,
+    owner_name AS `Owner Name`,
+    true_acres AS `True Acres`,
+    square_footage AS `Square Footage`,
+    FLOOR(true_acres * 22) AS `Estimated Units (at 22/acre)`,
+    assessed_value AS `Assessed Value`,
+    mailing_address AS `Mailing Address`,
+    mailing_city AS `Mailing City`,
+    mailing_state AS `Mailing State`,
+    mailing_zip AS `Mailing Zip`
+FROM 
+    vw_clean_private_land
+WHERE 
+    true_acres BETWEEN 0.501 AND 2.00
+ORDER BY 
+    true_acres DESC;
+
+-- 3. HIGH-DENSITY / PODIUM LIST (2.01+ Acres)
+SELECT 
+    account_number AS `Account Number`,
+    owner_name AS `Owner Name`,
+    true_acres AS `True Acres`,
+    square_footage AS `Square Footage`,
+    FLOOR(true_acres * 75) AS `Estimated Units (at 75/acre)`,
+    assessed_value AS `Assessed Value`,
+    mailing_address AS `Mailing Address`,
+    mailing_city AS `Mailing City`,
+    mailing_state AS `Mailing State`,
+    mailing_zip AS `Mailing Zip`
+FROM 
+    vw_clean_private_land
+WHERE 
+    true_acres > 2.00
+ORDER BY 
+    true_acres DESC;
